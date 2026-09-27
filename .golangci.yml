@@ -1,0 +1,97 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    # Bugs and correctness
+    - bodyclose
+    - durationcheck
+    - errcheck
+    - govet
+    - ineffassign
+    - nilerr
+    - staticcheck
+    - unused
+
+    # Style
+    - revive
+    - unconvert
+    - unparam
+    - whitespace
+
+    # Complexity (skip tests)
+    - cyclop
+    - gocognit
+    - gocyclo
+
+    # Security
+    - gosec
+
+    # Errors
+    - errname
+    - errorlint
+    - exhaustive
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: increment-decrement
+        - name: var-naming
+        - name: package-comments
+          disabled: true
+    cyclop:
+      max-complexity: 25
+    gocognit:
+      min-complexity: 35
+    gocyclo:
+      min-complexity: 25
+
+  exclusions:
+    generated: lax
+    rules:
+      # Test files: fixture code intentionally skips error checks and uses
+      # fixed subprocess/credential values. Production code is still linted
+      # strictly; gosec findings there must be fixed or annotated with #nosec.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - cyclop
+          - gocognit
+          - gocyclo
+          - unparam
+          - bodyclose
+          - gosec
+      - path: _test\.go
+        text: "dot-imports"
+        linters:
+          - revive
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+  settings:
+    gofumpt:
+      # Our module path has no slash, so gofumpt needs it explicitly to keep
+      # local imports (anti-loop-proxy/...) out of the stdlib import group.
+      module-path: anti-loop-proxy
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 10

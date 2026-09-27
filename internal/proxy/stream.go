@@ -33,7 +33,7 @@ type StreamFilter struct {
 // closeUp closes the upstream exactly once, no matter which path
 // (trigger, EOF, write error, cancellation) runs it.
 func (f *StreamFilter) closeUp() {
-	f.closeOnce.Do(func() { f.up.Close() })
+	f.closeOnce.Do(func() { _ = f.up.Close() })
 }
 
 // NewStreamFilter creates a StreamFilter that reads from up, writes to w,
@@ -152,5 +152,5 @@ func (f *StreamFilter) writeTrigger(res Result) {
 		SpanLen: res.SpanLen,
 		Span:    span,
 	})
-	fmt.Fprintf(f.w, "event: anti_loop\ndata: %s\n\ndata: [DONE]\n\n", payload)
+	_, _ = fmt.Fprintf(f.w, "event: anti_loop\ndata: %s\n\ndata: [DONE]\n\n", payload)
 }

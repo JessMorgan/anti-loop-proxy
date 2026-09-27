@@ -20,7 +20,7 @@ type pipeReadCloser struct {
 }
 
 func (p pipeReadCloser) Read(b []byte) (int, error) { return p.r.Read(b) }
-func (p pipeReadCloser) Close() error              { return p.r.Close() }
+func (p pipeReadCloser) Close() error               { return p.r.Close() }
 
 // feedPipe writes raw to the pipe writer in a goroutine, then closes it.
 func feedPipe(t *testing.T, raw string) io.ReadCloser {
@@ -221,7 +221,7 @@ func TestClientWriteFailure(t *testing.T) {
 	go func() {
 		// Keep feeding lines until the reader closes the pipe.
 		for i := 0; ; i++ {
-			_, err := pw.Write([]byte(fmt.Sprintf("data: line %d\n", i)))
+			_, err := fmt.Fprintf(pw, "data: line %d\n", i)
 			if err != nil {
 				writeErr <- err
 				return

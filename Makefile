@@ -1,4 +1,4 @@
-.PHONY: build test lint docker-build docker-run clean
+.PHONY: build test lint local-ci docker-build docker-run clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/anti-loop-proxy ./cmd/anti-loop-proxy
@@ -8,6 +8,10 @@ test:
 
 lint:
 	go vet ./...
+	golangci-lint run --timeout=5m
+
+local-ci:
+	bash scripts/local-ci.sh
 
 docker-build:
 	docker build -t anti-loop-proxy:latest .

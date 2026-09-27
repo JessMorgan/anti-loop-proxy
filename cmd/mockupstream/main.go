@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -38,7 +39,7 @@ func main() {
 
 		if !req.Stream {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]}`)
+			_, _ = fmt.Fprint(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]}`)
 			return
 		}
 
@@ -46,7 +47,7 @@ func main() {
 		fl, _ := w.(http.Flusher)
 		chunk := func(content string) {
 			payload := fmt.Sprintf(`{"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":%q},"finish_reason":null}]}`, content)
-			fmt.Fprintf(w, "data: %s\n\n", payload)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
 			if fl != nil {
 				fl.Flush()
 			}
@@ -62,11 +63,15 @@ func main() {
 			chunk("world, ")
 			chunk("this is a normal stream.")
 		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		if fl != nil {
 			fl.Flush()
 		}
 	})
 
-	http.ListenAndServe(*addr, mux)
+	// #nosec G114 -- test-only mock upstream; no timeout configuration needed.
+	if err := http.ListenAndServe(*addr, mux); err != nil {
+		fmt.Fprintf(os.Stderr, "mockupstream: %v\n", err)
+		os.Exit(1)
+	}
 }

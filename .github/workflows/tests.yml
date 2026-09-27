@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.24.x'
+
+jobs:
+  source-tracking:
+    name: Source tracking
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check Go sources are not ignored
+        run: bash scripts/check-ignored-sources.sh
+
+  format:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache: true
+      - name: Check gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: Check gofumpt
+        run: |
+          go install mvdan.cc/gofumpt@latest
+          # module-path keeps local imports (anti-loop-proxy/...) out of the
+          # stdlib import group; the module name has no slash.
+          test -z "$(gofumpt -l -modpath=anti-loop-proxy .)"
+      - name: Check generated module metadata
+        run: go mod tidy && git diff --exit-code -- go.mod go.sum
+
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache: true
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.1
+          args: --timeout=5m
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache: true
+      - name: Run unit tests with coverage
+        run: go test -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Enforce minimum coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${COVERAGE}%"
+          if [ "$(echo "$COVERAGE < 70" | bc -l)" = "1" ]; then
+            echo "FAIL: Coverage ${COVERAGE}% is below 70% threshold"
+            exit 1
+          fi
+      - name: Run race detector
+        run: go test -count=1 -race ./...
+      - name: Upload coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-coverage
+          path: coverage.out
+
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: Staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: latest
+          install-go: false
+          # Skip the action's internal actions/cache step, which is pinned
+          # to a Node 20 build and triggers a deprecation warning.
+          use-cache: false
+          cache-key: staticcheck-${{ runner.os }}-${{ env.GO_VERSION }}
+      - name: Go vulnerability check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  build:
+    name: Strict build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache: true
+      - name: Strict compile
+        env:
+          CGO_ENABLED: '0'
+          GOFLAGS: '-trimpath'
+        run: go build -buildvcs=true -ldflags='-s -w' ./...
+      - name: Verify module graph
+        run: go list -m all
+
+  container:
+    name: Container build
+    runs-on: ubuntu-latest
+    needs: [source-tracking, format, lint, test, static-analysis, build]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          tags: anti-loop-proxy:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

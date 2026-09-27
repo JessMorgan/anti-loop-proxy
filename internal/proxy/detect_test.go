@@ -69,7 +69,7 @@ func TestSpanAboveMaxLen(t *testing.T) {
 
 func TestGapAboveMaxGap(t *testing.T) {
 	s := "abcdabcdabcd" // 12 runes
-	gap := "12345"     // 5 runes between occurrences
+	gap := "12345"      // 5 runes between occurrences
 	text := strings.Join([]string{s, s, s, s}, gap)
 
 	d0 := NewDetector(defaultParams) // MaxGap=0
@@ -173,8 +173,8 @@ func TestLargerSpanPreferred(t *testing.T) {
 
 func TestChainBreaksOnLargeGap(t *testing.T) {
 	d := NewDetector(defaultParams)
-	s := "abcdabcdabcd" // 12 runes
-	filler := distinctRunes(100) // no overlap with s
+	s := "abcdabcdabcd"                    // 12 runes
+	filler := distinctRunes(100)           // no overlap with s
 	text := rep(s, 2) + filler + rep(s, 2) // 4 occurrences, one 100-rune gap
 	if _, ok := d.Feed(text); ok {
 		t.Fatalf("triggered despite a gap > MaxGap in the chain")

@@ -192,13 +192,13 @@ func TestLoadValidationErrors(t *testing.T) {
 			wantErr: "upstream",
 		},
 		{
-			name: "upstream not absolute URL",
-			env:  map[string]string{"ANTI_LOOP_UPSTREAM": "example.com"},
+			name:    "upstream not absolute URL",
+			env:     map[string]string{"ANTI_LOOP_UPSTREAM": "example.com"},
 			wantErr: "upstream",
 		},
 		{
-			name: "upstream not http/https",
-			env:  map[string]string{"ANTI_LOOP_UPSTREAM": "ftp://example.com"},
+			name:    "upstream not http/https",
+			env:     map[string]string{"ANTI_LOOP_UPSTREAM": "ftp://example.com"},
 			wantErr: "upstream",
 		},
 		{

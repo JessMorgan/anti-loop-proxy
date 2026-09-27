@@ -104,7 +104,7 @@ func New(cfg *config.Config, log *slog.Logger) *http.Handler {
 				pw:     pw,
 			}
 			return nil
-	},
+		},
 	}
 	hnd := http.Handler(h)
 	return &hnd
@@ -122,7 +122,7 @@ func paramsFrom(cfg *config.Config) Params {
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, "ok\n")
+		_, _ = io.WriteString(w, "ok\n")
 		return
 	}
 
@@ -154,7 +154,7 @@ func sniffStream(r *http.Request) bool {
 		return false // too large: do not enable stream filtering
 	}
 	data, err := io.ReadAll(r.Body)
-	r.Body.Close()
+	_ = r.Body.Close()
 	if err != nil {
 		return false
 	}
@@ -193,7 +193,7 @@ func (b *filteredBody) Read(p []byte) (int, error) {
 				b.pw.CloseWithError(err)
 				return
 			}
-			b.pw.Close()
+			_ = b.pw.Close()
 		}()
 	})
 	return b.pr.Read(p)
@@ -203,7 +203,7 @@ func (b *filteredBody) Read(p []byte) (int, error) {
 // disconnect) by closing the pipe reader.
 func (b *filteredBody) Close() error {
 	if b.pr != nil {
-		b.pr.Close()
+		_ = b.pr.Close()
 	}
 	return nil
 }

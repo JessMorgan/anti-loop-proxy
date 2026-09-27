@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.env.*
+bin
+coverage.out
+*.test
+anti-loop-proxy
+anti-loop-proxy-linux-amd64
+anti-loop-proxy-linux-arm64
+README.md
+docs

@@ -16,6 +16,12 @@ import (
 	"anti-loop-proxy/internal/proxy"
 )
 
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -31,7 +37,11 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 
 	h := proxy.New(cfg, log)
-	srv := &http.Server{Addr: cfg.Listen, Handler: *h}
+	srv := &http.Server{
+		Addr:              cfg.Listen,
+		Handler:           *h,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	// Graceful shutdown on SIGINT/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -46,7 +56,7 @@ func main() {
 		}
 	}()
 
-	log.Info("starting anti-loop-proxy", "listen", cfg.Listen, "upstream", cfg.Upstream)
+	log.Info("starting anti-loop-proxy", "listen", cfg.Listen, "upstream", cfg.Upstream, "version", version, "commit", commit, "date", date)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("server failed", "err", err)
 		os.Exit(1)

@@ -132,7 +132,7 @@ func defaults() *Config {
 
 // loadFile reads and parses a YAML config file.
 func loadFile(path string) (*fileConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from config, not user input
 	if err != nil {
 		return nil, err
 	}
