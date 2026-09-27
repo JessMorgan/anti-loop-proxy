@@ -118,6 +118,7 @@ early. Clients that strictly parse OpenAI SSE should ignore the unknown
 ## Operational notes
 
 - **`GET /healthz`** returns `200` with body `ok` and is not proxied.
+- **`GET /metrics`** serves Prometheus metrics (see below) and is not proxied.
 - **Logs** are structured JSON on stdout. Every request logs one line with
   `method`, `path`, `status`, `stream_cut` (boolean), and `duration_ms`.
   Stream cuts are additionally logged at `warn` level with `count`,
@@ -129,6 +130,30 @@ early. Clients that strictly parse OpenAI SSE should ignore the unknown
   `max_len*(min_count+1) + max_gap*min_count + max_len` runes of trailing
   history, plus one streamed line in flight), so memory is bounded per
   stream, not by response length.
+
+## Metrics
+
+The proxy exposes Prometheus metrics at `GET /metrics` (same port as the
+proxy). All metrics are prefixed `anti_loop_` and carry a `model` label —
+the top-level `"model"` field of the request body, or `unknown` when the
+body is unreadable, unparseable, oversized (over the 10 MB sniff cap), or
+omits it.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `anti_loop_requests_total` | counter | `model`, `status` | All proxied requests, by model and response status |
+| `anti_loop_stream_requests_total` | counter | `model` | Streaming (`stream: true`) requests, by model |
+| `anti_loop_stream_cuts_total` | counter | `model` | Streams cut for looping, by model |
+| `anti_loop_request_duration_seconds` | histogram | `model` | Request latency (buckets: 0.5s–120s) |
+| `anti_loop_active_streams` | gauge | `model` | In-flight streaming requests |
+| `anti_loop_upstream_errors_total` | counter | `model`, `status_class` | Upstream 4xx/5xx responses |
+| `anti_loop_cut_span_len` | histogram | `model` | Detected span length (runes) at trigger — useful for tuning `min_len`/`max_len` |
+
+Example:
+
+```sh
+curl -s http://localhost:8080/metrics | grep anti_loop_stream_cuts
+```
 
 ## Caveats
 

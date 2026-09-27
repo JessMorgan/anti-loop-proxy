@@ -54,6 +54,17 @@ Single Go module (`anti-loop-proxy`); the deployable binary is
   with host, `min_count >= 2`, `1 <= min_len <= max_len <= 4096`,
   `max_gap >= 0`, `log_level` in `debug|info|warn|error`, `listen` parsed
   with `net.SplitHostPort` — a bare host gets `:8080` appended).
+- **`internal/observability/`** — `Metrics`: owns all seven Prometheus
+  vectors (`anti_loop_requests_total`, `anti_loop_stream_requests_total`,
+  `anti_loop_stream_cuts_total`, `anti_loop_request_duration_seconds`,
+  `anti_loop_active_streams`, `anti_loop_upstream_errors_total`,
+  `anti_loop_cut_span_len`), all labeled by `model` (the request body's
+  top-level `"model"`, `unknown` when absent/unreadable); `New(r)` registers
+  on a given registerer, `NewDefault()` on the default registry, and
+  `Handler()` serves the exposition format (mounted at `GET /metrics`).
+  The proxy records through `RecordRequest`/`RecordStreamRequest`/
+  `StreamStarted`/`StreamFinished`/`RecordStreamCut` and never touches the
+  prometheus client directly.
 - **`internal/proxy/`** —
   - `detect.go` — `Params`, `Result`, `Detector`: a rune buffer fed per
     fragment; `scan()` only inspects the trailing window
@@ -69,8 +80,9 @@ Single Go module (`anti-loop-proxy`); the deployable binary is
     [DONE]`, logs at warn, and closes the upstream exactly once on every
     path (trigger, EOF, write error, ctx cancellation) via `closeOnce`.
     Malformed JSON in `data:` lines is logged at debug and skipped.
-  - `proxy.go` — `New(cfg, log) *http.Handler`: serves `GET /healthz`
-    (200 `ok`, not proxied); the `ReverseProxy` Director joins the upstream
+  - `proxy.go` — `New(cfg, log, metrics) *http.Handler`: serves `GET
+    /healthz` (200 `ok`) and `GET /metrics` (Prometheus exposition, not
+    proxied); the `ReverseProxy` Director joins the upstream
     base path onto the request path via `path.Join` and optionally overrides
     `Authorization: Bearer` (`cfg.UpstreamAPIKey`); the wrapper handler
     sniffs the request body once for top-level `"stream"` (bodies with

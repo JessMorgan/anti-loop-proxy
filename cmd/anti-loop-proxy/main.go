@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"anti-loop-proxy/internal/config"
+	"anti-loop-proxy/internal/observability"
 	"anti-loop-proxy/internal/proxy"
 )
 
@@ -36,7 +37,8 @@ func main() {
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 
-	h := proxy.New(cfg, log)
+	metrics := observability.NewDefault()
+	h := proxy.New(cfg, log, metrics)
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           *h,

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"anti-loop-proxy/internal/config"
+	"anti-loop-proxy/internal/observability"
 )
 
 // maxSniffBytes caps the request body size that is read for sniffing the
@@ -37,8 +38,9 @@ type stateKey struct{}
 // handler, the Director/ModifyResponse hooks (via request context), and the
 // filtered response body.
 type requestState struct {
-	stream    bool // request body had "stream": true
-	streamCut bool // StreamFilter triggered and cut the stream
+	stream    bool   // request body had "stream": true
+	model     string // request body "model" field ("unknown" if absent)
+	streamCut bool   // StreamFilter triggered and cut the stream
 }
 
 // statusWriter captures the response status code for post-copy logging.
@@ -57,12 +59,14 @@ func (s *statusWriter) WriteHeader(code int) {
 // handler is the outer http.Handler: it serves /healthz, sniffs the request
 // body, and measures duration for the post-copy access log.
 type handler struct {
-	proxy *httputil.ReverseProxy
-	log   *slog.Logger
+	proxy   *httputil.ReverseProxy
+	log     *slog.Logger
+	metrics *observability.Metrics
 }
 
-// New builds the proxy handler for cfg.
-func New(cfg *config.Config, log *slog.Logger) *http.Handler {
+// New builds the proxy handler for cfg. m records Prometheus metrics for
+// every proxied request; /metrics serves the exposition endpoint.
+func New(cfg *config.Config, log *slog.Logger, m *observability.Metrics) *http.Handler {
 	upstream, err := url.Parse(cfg.Upstream)
 	if err != nil || upstream.Host == "" {
 		var bad http.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -70,7 +74,7 @@ func New(cfg *config.Config, log *slog.Logger) *http.Handler {
 		})
 		return &bad
 	}
-	h := &handler{log: log}
+	h := &handler{log: log, metrics: m}
 	h.proxy = &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = upstream.Scheme
@@ -97,11 +101,13 @@ func New(cfg *config.Config, log *slog.Logger) *http.Handler {
 			// ResponseWriter directly would bypass the chunked encoder).
 			pr, pw := io.Pipe()
 			res.Body = &filteredBody{
-				ctx:    req.Context(),
-				filter: NewStreamFilter(pw, res.Body, paramsFrom(cfg), log),
-				st:     st,
-				pr:     pr,
-				pw:     pw,
+				ctx:     req.Context(),
+				filter:  NewStreamFilter(pw, res.Body, paramsFrom(cfg), log),
+				st:      st,
+				model:   st.model,
+				metrics: m,
+				pr:      pr,
+				pw:      pw,
 			}
 			return nil
 		},
@@ -125,14 +131,24 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok\n")
 		return
 	}
+	if r.Method == http.MethodGet && r.URL.Path == "/metrics" {
+		h.metrics.Handler().ServeHTTP(w, r)
+		return
+	}
 
-	// Read the body once, sniff "stream", and reattach it for the proxy.
-	st := &requestState{stream: sniffStream(r)}
+	// Read the body once, sniff "stream" and "model", and reattach it for
+	// the proxy.
+	stream, model := sniffStream(r)
+	st := &requestState{stream: stream, model: model}
 	r = r.WithContext(context.WithValue(r.Context(), stateKey{}, st))
+	if st.stream {
+		h.metrics.RecordStreamRequest(st.model)
+	}
 
 	sw := &statusWriter{ResponseWriter: w}
 	start := time.Now()
 	h.proxy.ServeHTTP(sw, r)
+	h.metrics.RecordRequest(st.model, sw.status, time.Since(start))
 	h.log.Info("request",
 		"method", r.Method,
 		"path", r.URL.Path,
@@ -143,29 +159,34 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // sniffStream reads the request body once (capped at maxSniffBytes), decodes
-// the top-level "stream" bool, and replaces req.Body with a bytes.Reader so
-// the proxy can send it. Bodies with a known ContentLength above the cap are
-// passed through unmodified (never read).
-func sniffStream(r *http.Request) bool {
+// the top-level "stream" bool and "model" string, and replaces req.Body with
+// a bytes.Reader so the proxy can send it. Bodies with a known ContentLength
+// above the cap are passed through unmodified (never read). The model is
+// "unknown" whenever the body is unreadable, unparseable, or omits it.
+func sniffStream(r *http.Request) (stream bool, model string) {
 	if r.Body == nil {
-		return false
+		return false, "unknown"
 	}
 	if r.ContentLength > maxSniffBytes {
-		return false // too large: do not enable stream filtering
+		return false, "unknown" // too large: do not enable stream filtering
 	}
 	data, err := io.ReadAll(r.Body)
 	_ = r.Body.Close()
 	if err != nil {
-		return false
+		return false, "unknown"
 	}
 	r.Body = io.NopCloser(bytes.NewReader(data))
 	var probe struct {
-		Stream bool `json:"stream"`
+		Stream bool   `json:"stream"`
+		Model  string `json:"model"`
 	}
 	if err := json.Unmarshal(data, &probe); err != nil {
-		return false
+		return false, "unknown"
 	}
-	return probe.Stream
+	if probe.Model == "" {
+		probe.Model = "unknown"
+	}
+	return probe.Stream, probe.Model
 }
 
 // filteredBody is the replacement response body for stream-filtered SSE
@@ -176,19 +197,26 @@ func sniffStream(r *http.Request) bool {
 // in the shared requestState so the wrapper handler can include it in the
 // post-copy access log.
 type filteredBody struct {
-	ctx    context.Context
-	filter *StreamFilter
-	st     *requestState
-	once   sync.Once
-	pr     *io.PipeReader
-	pw     *io.PipeWriter
+	ctx     context.Context
+	filter  *StreamFilter
+	st      *requestState
+	model   string
+	metrics *observability.Metrics
+	once    sync.Once
+	pr      *io.PipeReader
+	pw      *io.PipeWriter
 }
 
 func (b *filteredBody) Read(p []byte) (int, error) {
 	b.once.Do(func() {
 		go func() {
-			cut, _, err := b.filter.Run(b.ctx)
+			b.metrics.StreamStarted(b.model)
+			defer b.metrics.StreamFinished(b.model)
+			cut, res, err := b.filter.Run(b.ctx)
 			b.st.streamCut = cut
+			if cut {
+				b.metrics.RecordStreamCut(b.model, res.SpanLen)
+			}
 			if err != nil {
 				b.pw.CloseWithError(err)
 				return
