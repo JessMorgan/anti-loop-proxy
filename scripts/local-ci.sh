@@ -8,9 +8,16 @@
 #
 # Install prerequisites (once):
 #   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
-#   go install mvdan.cc/gofumpt@latest
-#   go install honnef.co/go/tools/cmd/staticcheck@latest
-#   go install golang.org/x/vuln/cmd/govulncheck@latest
+#   go install mvdan.cc/gofumpt@v0.9.2
+#   go install honnef.co/go/tools/cmd/staticcheck@2025.1.1   # on go 1.24; @latest on newer
+#   go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+#
+# Versions are pinned to the latest releases compatible with the project's
+# go 1.24 toolchain (CI runs Go 1.24.x with GOTOOLCHAIN=local). The @latest
+# releases of gofumpt (v0.12.0), staticcheck (v0.8.1), and govulncheck
+# (x/vuln v1.8.0) require go >= 1.26 and fail to install there. staticcheck
+# additionally must be built from a toolchain that can read the local Go
+# export data, so on a newer local toolchain use @latest instead.
 
 set -euo pipefail
 
@@ -64,8 +71,8 @@ if [ -n "$TRACKED_GO" ] && [ -n "$(gofmt -l $TRACKED_GO)" ]; then
 fi
 GF="$(command -v gofumpt || echo "$GOPATH_BIN/gofumpt")"
 if [ ! -x "$GF" ]; then
-  echo "gofumpt not found; installing mvdan.cc/gofumpt@latest"
-  GOTOOLCHAIN=${TOOLCHAIN_GO} go install mvdan.cc/gofumpt@latest
+  echo "gofumpt not found; installing mvdan.cc/gofumpt@v0.9.2"
+  GOTOOLCHAIN=${TOOLCHAIN_GO} go install mvdan.cc/gofumpt@v0.9.2
   GF="$GOPATH_BIN/gofumpt"
 fi
 # -modpath keeps local imports (anti-loop-proxy/...) out of the stdlib import
@@ -146,8 +153,17 @@ sa_ok=1
 if ! go vet ./...; then sa_ok=0; fi
 SC="$(command -v staticcheck || echo "$GOPATH_BIN/staticcheck")"
 if [ ! -x "$SC" ]; then
-  echo "staticcheck not found; installing honnef.co/go/tools/cmd/staticcheck@latest"
-  GOTOOLCHAIN=${TOOLCHAIN_GO} go install honnef.co/go/tools/cmd/staticcheck@latest
+  # staticcheck must be built from a toolchain that can read the local Go
+  # export data. CI runs Go 1.24.x, so the parity version is 2025.1.1 (the
+  # latest release compatible with go 1.24; @latest v0.8.1 needs go >= 1.26).
+  # A newer local toolchain needs @latest, which can read its export data.
+  if [ "$go_version" = "1.24" ]; then
+    SC_VERSION="2025.1.1"
+  else
+    SC_VERSION="latest"
+  fi
+  echo "staticcheck not found; installing honnef.co/go/tools/cmd/staticcheck@${SC_VERSION}"
+  GOTOOLCHAIN=${TOOLCHAIN_GO} go install "honnef.co/go/tools/cmd/staticcheck@${SC_VERSION}"
   SC="$GOPATH_BIN/staticcheck"
 fi
 if ! "$SC" ./...; then sa_ok=0; fi
@@ -156,8 +172,17 @@ if [ "$sa_ok" = "1" ]; then pass "go vet + staticcheck"; else fail "go vet + sta
 echo "Job: Go vulnerability check"
 VN="$(command -v govulncheck || echo "$GOPATH_BIN/govulncheck")"
 if [ ! -x "$VN" ] || "$VN" -version 2>/dev/null | grep -q "Scanner: govulncheck@v0"; then
-  echo "govulncheck missing or old; installing golang.org/x/vuln/cmd/govulncheck@latest"
-  GOTOOLCHAIN=${TOOLCHAIN_GO} go install golang.org/x/vuln/cmd/govulncheck@latest
+  # As with staticcheck, govulncheck must be built from a toolchain that can
+  # read the local Go export data. CI (go 1.24) uses v1.1.4 (the latest
+  # release compatible with go 1.24; @latest v1.8.0 needs go >= 1.26); a
+  # newer local toolchain needs @latest.
+  if [ "$go_version" = "1.24" ]; then
+    VN_VERSION="v1.1.4"
+  else
+    VN_VERSION="latest"
+  fi
+  echo "govulncheck missing or old; installing golang.org/x/vuln/cmd/govulncheck@${VN_VERSION}"
+  GOTOOLCHAIN=${TOOLCHAIN_GO} go install "golang.org/x/vuln/cmd/govulncheck@${VN_VERSION}"
   VN="$GOPATH_BIN/govulncheck"
 fi
 if "$VN" ./...; then

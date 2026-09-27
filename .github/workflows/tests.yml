@@ -39,7 +39,9 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Check gofumpt
         run: |
-          go install mvdan.cc/gofumpt@latest
+          # Pinned: gofumpt@latest (v0.12.0) requires go >= 1.26; v0.9.2 is
+          # the latest release compatible with the go 1.24 toolchain here.
+          go install mvdan.cc/gofumpt@v0.9.2
           # module-path keeps local imports (anti-loop-proxy/...) out of the
           # stdlib import group; the module name has no slash.
           test -z "$(gofumpt -l -modpath=anti-loop-proxy .)"
@@ -103,17 +105,16 @@ jobs:
       - name: go vet
         run: go vet ./...
       - name: Staticcheck
-        uses: dominikh/staticcheck-action@v1
-        with:
-          version: latest
-          install-go: false
-          # Skip the action's internal actions/cache step, which is pinned
-          # to a Node 20 build and triggers a deprecation warning.
-          use-cache: false
-          cache-key: staticcheck-${{ runner.os }}-${{ env.GO_VERSION }}
+        run: |
+          # Pinned: staticcheck@latest (v0.8.1) requires go >= 1.26;
+          # 2025.1.1 is the latest release compatible with go 1.24.
+          go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+          staticcheck ./...
       - name: Go vulnerability check
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          # Pinned: govulncheck@latest (x/vuln v1.8.0) requires go >= 1.26;
+          # v1.1.4 is the latest release compatible with go 1.24.
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
   build:
