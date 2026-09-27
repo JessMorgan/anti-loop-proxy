@@ -1,0 +1,44 @@
+# anti-loop-proxy configuration example.
+#
+# Place at /etc/anti-loop-proxy/config.yaml (default) or run with
+# ANTI_LOOP_CONFIG_FILE=/path/to/config.yaml to use a custom location.
+# A missing config file is not an error — defaults apply.
+#
+# Every value shown below is the built-in default.
+# Environment variables override these values (precedence: env > yaml > defaults).
+
+# Address the proxy listens on, host:port. Default: ":8080".
+# Env: ANTI_LOOP_LISTEN
+listen: ":8080"
+
+# REQUIRED. Absolute http:// or https:// URL of the upstream OpenAI-compatible
+# API, including any base path (e.g. /v1) that should be prepended to request
+# paths. The proxy will not start without it. Env: ANTI_LOOP_UPSTREAM
+upstream: "https://api.openai.com/v1"
+
+# API key to send upstream as Authorization: Bearer <key>, overriding the
+# client's key. Empty (default) means the client's key is passed through.
+# Env: ANTI_LOOP_UPSTREAM_API_KEY
+upstream_api_key: ""
+
+# Minimum number of identical span occurrences required to trigger the cut.
+# Must be >= 2. Default: 4. Env: ANTI_LOOP_MIN_COUNT
+min_count: 4
+
+# Minimum span length, in runes (Unicode code points). Default: 12.
+# Must be >= 1. Env: ANTI_LOOP_MIN_LEN
+min_len: 12
+
+# Maximum span length, in runes. Spans longer than this are not detectable
+# (bounded-window detection). Default: 200. Must be >= min_len and <= 4096.
+# Env: ANTI_LOOP_MAX_LEN
+max_len: 200
+
+# Maximum number of non-duplicated runes allowed between consecutive
+# occurrences of the span. 0 means the occurrences must be directly adjacent.
+# Default: 0. Must be >= 0. Env: ANTI_LOOP_MAX_GAP
+max_gap: 0
+
+# Log level: debug, info, warn, or error. Default: info.
+# Env: ANTI_LOOP_LOG_LEVEL
+log_level: "info"

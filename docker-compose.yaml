@@ -1,0 +1,29 @@
+# anti-loop-proxy — single-service compose file (modern compose spec, no version key).
+#
+# Health: the image is distroless (no shell/wget), so no container-level
+# healthcheck is defined here. The binary serves GET /healthz — use it for
+# k8s liveness/readiness probes or an orchestrator health check.
+
+services:
+  anti-loop-proxy:
+    build:
+      context: .
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    environment:
+      # Required upstream base URL (no default in the app).
+      ANTI_LOOP_UPSTREAM: "https://api.openai.com"
+      # Optional: API key forwarded to the upstream as Authorization.
+      # ANTI_LOOP_UPSTREAM_API_KEY: "sk-..."
+      # Loop-detection thresholds (defaults shown in parens):
+      # ANTI_LOOP_MIN_COUNT: "4"
+      # ANTI_LOOP_MIN_LEN: "12"
+      # ANTI_LOOP_MAX_LEN: "200"
+      # ANTI_LOOP_MAX_GAP: "0"
+      # Log level: debug | info | warn | error (default: info)
+      ANTI_LOOP_LOG_LEVEL: "info"
+    # Optional: mount a config file (app default path is
+    # /etc/anti-loop-proxy/config.yaml, overridable via ANTI_LOOP_CONFIG_FILE):
+    # volumes:
+    #   - ./config.yaml:/etc/anti-loop-proxy/config.yaml:ro
