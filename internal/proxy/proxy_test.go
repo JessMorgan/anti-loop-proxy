@@ -253,6 +253,81 @@ func TestAuthorizationOverride(t *testing.T) {
 	}
 }
 
+// TestUpstreamPathJoin guards the Rewrite migration: the upstream base path
+// is joined onto the request path exactly once, and the query string is
+// preserved. startProxy cannot be used because it overrides cfg.Upstream
+// with its own (path-less) server URL, so the proxy is built directly.
+func TestUpstreamPathJoin(t *testing.T) {
+	var gotPath, gotQuery string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{}`)
+	}))
+	t.Cleanup(up.Close)
+	cfg := testCfg(up.URL+"/base", "")
+	proxy := httptest.NewServer(*New(cfg, proxyTestLog(), observability.New(prometheus.NewRegistry())))
+	t.Cleanup(proxy.Close)
+
+	resp, err := http.Post(proxy.URL+"/v1/chat/completions?max_tokens=5", "application/json",
+		strings.NewReader(`{"model":"gpt-4","stream":false,"messages":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if gotPath != "/base/v1/chat/completions" {
+		t.Errorf("upstream path = %q, want %q (base path joined once)", gotPath, "/base/v1/chat/completions")
+	}
+	if gotQuery != "max_tokens=5" {
+		t.Errorf("upstream query = %q, want %q", gotQuery, "max_tokens=5")
+	}
+}
+
+// TestXForwardedFor guards the Rewrite migration: the client IP is always
+// sent to the upstream, and a client-provided value is preserved with the
+// client IP appended (Director-era behavior).
+func TestXForwardedFor(t *testing.T) {
+	var plain, prior string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plain":
+			plain = r.Header.Get("X-Forwarded-For")
+		case "/prior":
+			prior = r.Header.Get("X-Forwarded-For")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{}`)
+	}))
+	t.Cleanup(up.Close)
+	proxy := httptest.NewServer(*New(testCfg(up.URL, ""), proxyTestLog(), observability.New(prometheus.NewRegistry())))
+	t.Cleanup(proxy.Close)
+
+	// No client XFF: upstream should still receive the client IP.
+	resp, err := http.Get(proxy.URL + "/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if plain == "" {
+		t.Error("upstream X-Forwarded-For empty, want the client IP")
+	}
+
+	// Client-provided XFF: preserved, client IP appended.
+	req, err := http.NewRequest(http.MethodGet, proxy.URL+"/prior", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Forwarded-For", "10.0.0.1")
+	resp, err = proxy.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if prior == "" || !strings.HasPrefix(prior, "10.0.0.1, ") {
+		t.Errorf("upstream X-Forwarded-For = %q, want prefix %q", prior, "10.0.0.1, ")
+	}
+}
+
 func TestMetrics(t *testing.T) {
 	// 12-rune span repeated 4 times triggers the default Params.
 	span := "abcdefghijkl"

@@ -8,22 +8,21 @@
 #
 # Install prerequisites (once):
 #   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
-#   go install mvdan.cc/gofumpt@v0.9.2
-#   go install honnef.co/go/tools/cmd/staticcheck@2025.1.1   # on go 1.24; @latest on newer
-#   go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+#   go install mvdan.cc/gofumpt@latest
+#   go install honnef.co/go/tools/cmd/staticcheck@latest
+#   go install golang.org/x/vuln/cmd/govulncheck@latest
 #
-# Versions are pinned to the latest releases compatible with the project's
-# go 1.24 toolchain (CI runs Go 1.24.x with GOTOOLCHAIN=local). The @latest
-# releases of gofumpt (v0.12.0), staticcheck (v0.8.1), and govulncheck
-# (x/vuln v1.8.0) require go >= 1.26 and fail to install there. staticcheck
-# additionally must be built from a toolchain that can read the local Go
-# export data, so on a newer local toolchain use @latest instead.
+# CI runs Go 1.26.x, so @latest tool releases install cleanly. staticcheck
+# and govulncheck must be built from a toolchain that can read the local Go
+# export data: on a local toolchain older than the project's, install the
+# latest release compatible with that toolchain instead (see the install
+# blocks below).
 
 set -euo pipefail
 
 GOPATH_BIN="$(go env GOPATH)/bin"
-GO_VERSION_OK='1.24.x'
-# CI installs tools with setup-go's check-latest 1.24 toolchain. With
+GO_VERSION_OK='1.26.x'
+# CI installs tools with setup-go's check-latest 1.26 toolchain. With
 # GOTOOLCHAIN=auto, `go install` can silently select a lower toolchain; pin it
 # so locally-built tools are the same (or newer) than the project requires.
 CURRENT_MAJOR_MINOR="$(go version | sed -nE 's/.*go([0-9]+\.[0-9]+).*/\1/p')"
@@ -36,7 +35,7 @@ pass() { echo -e "\n\033[1;32mPASS:\033[0m $1"; PASSED=$((PASSED + 1)); }
 fail() { echo -e "\n\033[1;31mFAIL:\033[0m $1"; FAILED=$((FAILED + 1)); }
 
 # ---------------------------------------------------------------------------
-# Determine active Go version family (matches workflow GO_VERSION: '1.24.x').
+# Determine active Go version family (matches workflow GO_VERSION: '1.26.x').
 # ---------------------------------------------------------------------------
 go_version="$(go version | sed -nE 's/.*go([0-9]+\.[0-9]+).*/\1/p')"
 expected="${GO_VERSION_OK%.*}"
@@ -71,8 +70,8 @@ if [ -n "$TRACKED_GO" ] && [ -n "$(gofmt -l $TRACKED_GO)" ]; then
 fi
 GF="$(command -v gofumpt || echo "$GOPATH_BIN/gofumpt")"
 if [ ! -x "$GF" ]; then
-  echo "gofumpt not found; installing mvdan.cc/gofumpt@v0.9.2"
-  GOTOOLCHAIN=${TOOLCHAIN_GO} go install mvdan.cc/gofumpt@v0.9.2
+  echo "gofumpt not found; installing mvdan.cc/gofumpt@latest"
+  GOTOOLCHAIN=${TOOLCHAIN_GO} go install mvdan.cc/gofumpt@latest
   GF="$GOPATH_BIN/gofumpt"
 fi
 # -modpath keeps local imports (anti-loop-proxy/...) out of the stdlib import
@@ -154,9 +153,10 @@ if ! go vet ./...; then sa_ok=0; fi
 SC="$(command -v staticcheck || echo "$GOPATH_BIN/staticcheck")"
 if [ ! -x "$SC" ]; then
   # staticcheck must be built from a toolchain that can read the local Go
-  # export data. CI runs Go 1.24.x, so the parity version is 2025.1.1 (the
-  # latest release compatible with go 1.24; @latest v0.8.1 needs go >= 1.26).
-  # A newer local toolchain needs @latest, which can read its export data.
+  # export data. CI runs Go 1.26.x, so @latest is the parity version; a
+  # local toolchain older than the project's (e.g. go 1.24) needs the
+  # latest release compatible with it (2025.1.1), since @latest (v0.8.1)
+  # requires go >= 1.26.
   if [ "$go_version" = "1.24" ]; then
     SC_VERSION="2025.1.1"
   else
@@ -173,9 +173,10 @@ echo "Job: Go vulnerability check"
 VN="$(command -v govulncheck || echo "$GOPATH_BIN/govulncheck")"
 if [ ! -x "$VN" ] || "$VN" -version 2>/dev/null | grep -q "Scanner: govulncheck@v0"; then
   # As with staticcheck, govulncheck must be built from a toolchain that can
-  # read the local Go export data. CI (go 1.24) uses v1.1.4 (the latest
-  # release compatible with go 1.24; @latest v1.8.0 needs go >= 1.26); a
-  # newer local toolchain needs @latest.
+  # read the local Go export data. CI (go 1.26) uses @latest; a local
+  # toolchain older than the project's (e.g. go 1.24) needs the latest
+  # release compatible with it (v1.1.4), since @latest (v1.8.0) requires
+  # go >= 1.26.
   if [ "$go_version" = "1.24" ]; then
     VN_VERSION="v1.1.4"
   else

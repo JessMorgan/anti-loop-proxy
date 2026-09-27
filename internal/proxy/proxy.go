@@ -15,10 +15,10 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -35,7 +35,7 @@ const maxSniffBytes = 10 << 20 // 10 MB
 type stateKey struct{}
 
 // requestState is a per-request side channel shared between the wrapper
-// handler, the Director/ModifyResponse hooks (via request context), and the
+// handler, the Rewrite/ModifyResponse hooks (via request context), and the
 // filtered response body.
 type requestState struct {
 	stream    bool   // request body had "stream": true
@@ -76,16 +76,6 @@ func New(cfg *config.Config, log *slog.Logger, m *observability.Metrics) *http.H
 	}
 	h := &handler{log: log, metrics: m}
 	h.proxy = &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = upstream.Scheme
-			req.URL.Host = upstream.Host
-			// Preserve the upstream's base path prefix (e.g. /v1).
-			req.URL.Path = path.Join(upstream.Path, req.URL.Path)
-			req.Host = upstream.Host
-			if cfg.UpstreamAPIKey != "" {
-				req.Header.Set("Authorization", "Bearer "+cfg.UpstreamAPIKey)
-			}
-		},
 		ModifyResponse: func(res *http.Response) error {
 			if !strings.Contains(res.Header.Get("Content-Type"), "text/event-stream") {
 				return nil // byte-for-byte passthrough
@@ -111,6 +101,34 @@ func New(cfg *config.Config, log *slog.Logger, m *observability.Metrics) *http.H
 			}
 			return nil
 		},
+	}
+	h.proxy.Rewrite = func(pr *httputil.ProxyRequest) {
+		// Rewrite the request URL onto the upstream. SetURL joins the
+		// upstream's base path prefix (e.g. /v1) onto the incoming path
+		// and preserves the query string.
+		pr.SetURL(&url.URL{
+			Scheme: upstream.Scheme,
+			Host:   upstream.Host,
+			Path:   upstream.Path,
+		})
+		pr.Out.Host = upstream.Host
+		if cfg.UpstreamAPIKey != "" {
+			pr.Out.Header.Set("Authorization", "Bearer "+cfg.UpstreamAPIKey)
+		}
+		// Preserve the Director-era X-Forwarded-For behavior: client IP,
+		// or "prior, clientIP" when the client supplied a value. The
+		// Rewrite path strips forwarding headers and (unlike the Director
+		// path) does not re-add them, so restore manually. (The stdlib
+		// copy-and-SetXForwarded pattern would omit the header entirely
+		// when the client sent none — Issue 38079 — dropping the client
+		// IP the old Director path always set.)
+		if clientIP, _, err := net.SplitHostPort(pr.In.RemoteAddr); err == nil {
+			prior := pr.In.Header["X-Forwarded-For"]
+			if len(prior) > 0 {
+				clientIP = strings.Join(prior, ", ") + ", " + clientIP
+			}
+			pr.Out.Header.Set("X-Forwarded-For", clientIP)
+		}
 	}
 	hnd := http.Handler(h)
 	return &hnd
